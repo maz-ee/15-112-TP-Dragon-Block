@@ -39,27 +39,25 @@ class Block():
         self.height = 20
         self.x = x
         self.y = y
-        self.row = 12
-        self.col = 8
-        # self.gridX = self.x+self.width/2
-        # self.gridY = self.y-self.height/2
+        self.gridX = self.x+self.width/2
+        self.gridY = self.y-self.height/2
         self.gridPosition = ()
-        self.hasBeenHit = False
-        self.onObstacle = False
+        self.getGridPosition()
+        # self.row = row
+        # self.col = col
     def slide(self):
         #move block
         self.x += 20
-        #self.gridX += 20
-        self.col+=1
-    # def getGridPosition(self):
-    #     #
-    #     row = int(self.gridY//self.app.cellHeight)%15
-    #     col = int(self.gridX//self.app.cellWidth)%15
-    #     self.gridPosition = (row, col)
+        self.gridX += 20
+    def getGridPosition(self):     
+        row = int(self.gridY//self.app.cellHeight)%15
+        col = int(self.gridX//self.app.cellWidth)%15
+        self.gridPosition = (row, col)
     def draw(self, canvas):
         cx = self.x-self.app.scrollX
         cy = self.y-self.app.scrollY
         canvas.create_rectangle(cx-self.width/2, cy-self.height/2, cx+self.width/2, cy+self.height/2, fill = "red")
+        canvas.create_text(cx, cy, text = f"{self.gridPosition[0]}, {self.gridPosition[1]}")
 
 class Head(Block):
     #the "dragon" block
@@ -80,7 +78,12 @@ class Dragon():
         self.lastTime = 0
         self.time = 0       
         self.blocks = [Head(self.app, self.app.width/2, self.app.height-50)]
-        #self.gridPositions = []
+        self.isFalling = False
+        self.lastTime = 0
+    def checkGameOver(self):
+        #if there are no more blocks (all blocks were hit)
+        if len(self.blocks)==0 or not isinstance(self.blocks[0], Head):
+            self.app.setActiveMode("gameOver")
     def spawnBlock(self):
         #add blocks to the tail
         if len(self.blocks)>=1:
@@ -90,41 +93,73 @@ class Dragon():
             #move all current blocks up by one block
             for block in self.blocks:
                 block.y -= block.width
-                #block.gridY -= block.width
-                if block.row>0:
-                    block.row-=1
+                block.gridY -= block.width
+                # if block.row>0:
+                #     block.row-=1
             #add 40 to offset y from ground... 10 for block.width/2 & 30 for ground height -> y + 10 +self.app.ground.height
             self.blocks.append(Block(self.app, x, y))
-    def checkGameOver(self):
-        #if there are no more blocks (all blocks were hit)
-        if len(self.blocks)==0 or not isinstance(self.blocks[0], Head):
-            self.app.setActiveMode("gameOver")
-    # def updateGridPositions(self):
-    #     for block in self.blocks:
-    #         if block.col!=self.app.cols-1:
-    #             block.col+=1
-    #         #block.getGridPosition()
+    def updateGridPositions(self):
+        for block in self.blocks:
+            block.getGridPosition()
     def slide(self):
         #dragon moving
         self.app.scrollX+=20
         #move all blocks
         for block in self.blocks:
             block.slide()
-        #self.updateGridPositions()
-        #self.collidesWithObstacle()
+        self.updateGridPositions()
+        self.collidesWithObstacle()
     def collidesWithObstacle(self):
         keepers = []
         for i in range(len(self.blocks)):
             block = self.blocks[i]
             #print(block.gridPosition[0], block.gridPosition[1])
-            # if self.app.grid[block.gridPosition[0]][block.gridPosition[1]-1] == None:
-            #     keepers.append(block)
-            if self.app.grid[block.row][block.col]==None:
+            #8 b/c the dragon is always in the center of the screen
+            if self.app.grid[block.gridPosition[0]][8] == None:
                 keepers.append(block)
+            # if self.app.grid[block.row][block.col]==None:
+            #     keepers.append(block)
             else:
                 print("collided")
+                #self.isFalling  = True
+                self.updateDragon()
         self.blocks = keepers
-        
+    def updateDragon(self):
+        #case where a bottom block is sliced
+        if self.blocks[-1].gridPosition[0] != 12:
+            self.isFalling = True
+            self.fall(1)
+        # case where a middle block is sliced 
+        else:
+            for block in self.blocks:
+                blockRow = block.gridPosition[0]
+                #blockCol = block.gridPosition[1]
+                if self.app.grid[blockRow-1][8] == None:
+                    self.isFalling = True
+                    break
+    def fall(self, case):
+        #TODO:  :)
+        if len(self.blocks)>0:
+            if self.lastTime == 0:
+                    self.lastTime = time.monotonic()
+                    self.dt = 0
+            else:
+                self.dt = time.monotonic() - self.lastTime
+            if case == 1: # Start Fall faster for box obstacle
+                if (self.dt < 3):
+                    self.dt = 3
+            dt = int(self.dt**2)
+            # limt fall to stop at ground level
+            if self.blocks[-1].y+self.blocks[-1].height/2+dt > 260:
+                dt = 260 - (self.blocks[-1].y+self.blocks[-1].height/2)
+                #self.colFall[case] = False
+                self.lastTime = 0
+            for block in reversed(self.blocks[:idx]):
+                block.y += dt
+        else:
+            self.lastTime = 0
+        #make isFalling false...
+        self.isFalling = False
     def draw(self, canvas):
         for block in self.blocks:
             block.draw(canvas)
@@ -152,7 +187,6 @@ class BlockObstacle(Obstacle):
         x1 = x0+self.app.cellWidth
         y1 = y0+self.app.cellHeight
         canvas.create_rectangle(x0, y0, x1, y1, fill = "brown")
-        #canvas.create_rectangle(cx-self.width/2, cy-self.height/2, cx+self.width/2, cy+self.height/2, fill = "brown")
     
 
 class PlayMode(Mode):
@@ -204,25 +238,27 @@ class PlayMode(Mode):
             return True
         return False
     def updateGrid(self):
-        if self.scrollX//self.cellWidth > self.cellScrolls:
-            self.cellScrolls += 1
-            #shift obstacle filled blocks one cell left
-            for row in range(self.rows-2):
-                for col in range(self.cols):
-                    if self.grid[row][col] != None:
-                        if not self.outOfBounds(row, col-1):
-                            self.grid[row][col-1] = self.grid[row][col]
-                        self.grid[row][col] = None
+        # if self.scrollX//self.cellWidth > self.cellScrolls:
+        #     self.cellScrolls += 1
+        #shift obstacle filled blocks one cell left
+        for row in range(self.rows-2):
+            for col in range(self.cols):
+                if self.grid[row][col] != None:
+                    if not self.outOfBounds(row, col-1):
+                        self.grid[row][col-1] = self.grid[row][col]
+                    self.grid[row][col] = None
     def keyPressed(self, event):
          if event.key == "Space":
             self.dragon.spawnBlock()
     def timerFired(self):
         self.timerCalls+=1
         #if self.timerCalls%5==0:
-        self.dragon.collidesWithObstacle()
+        #self.dragon.collidesWithObstacle()
         self.dragon.slide()
         self.updateGrid()
         #self.spawnObstacles()
+        # if self.dragon.isFalling:
+        #     self.dragon.fall()
         self.dragon.checkGameOver()
     def redrawAll(self, canvas):
         for row in range(self.rows):
@@ -241,9 +277,9 @@ class PlayMode(Mode):
                 canvas.create_rectangle(x0, y0, x1, y1, outline = "MistyRose2")
                 if isinstance(val, BlockObstacle):
                     #print("draw")
-                    self.grid[row][col].draw(canvas)
-                if self.grid[row][col] != None:
-                    canvas.create_text((x0+x1)/2, (y0+y1)/2, text = "OBST")
+                    val.draw(canvas)
+                # if self.grid[row][col] != None:
+                #     canvas.create_text((x0+x1)/2, (y0+y1)/2, text = f"{row}, {col}")
         #self.blckObst.draw(canvas)
         self.dragon.draw(canvas)
 
